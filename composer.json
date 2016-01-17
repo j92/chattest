@@ -1,8 +1,6 @@
 {
   "require": {
     "symfony/console": "~3.0",
-    "guzzlehttp/guzzle": "~6.1",
-    "symfony/process": "~3.0",
     "react/react": "^0.4.2"
   },
   "autoload": {
