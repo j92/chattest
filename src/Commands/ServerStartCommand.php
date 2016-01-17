@@ -9,11 +9,14 @@
 namespace Chat\Commands;
 
 use Chat\DatabaseAdapter;
+use React\EventLoop\Factory as LoopFactory;
+use React\EventLoop\LoopInterface;
 use React\Socket\Server as ServerSocket;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
+use Chat\Client;
 
 
 class ServerStartCommand extends Command
@@ -26,7 +29,7 @@ class ServerStartCommand extends Command
     private $port;
     private $database;
 
-    public function __construct(DatabaseAdapter $database, $loop, ServerSocket $socket)
+    public function __construct(DatabaseAdapter $database, LoopInterface $loop, ServerSocket $socket)
     {
         $this->database      = $database;
         $this->loop          = $loop;
@@ -77,13 +80,13 @@ class ServerStartCommand extends Command
      */
     private function configureServerSocket()
     {
-        // Handle incoming packages
-        $this->onIncoming($this->server_socket);
+        // Set up the listeners for handling incoming packages
+        $this->onIncoming($this->server_socket, $this->loop);
 
         $this->output->writeln("<info>Socket server listening on port {$this->port}.</info>");
         $this->output->writeln("<info>You can connect to it by running: telnet {$this->host} {$this->port}</info>");
 
-        $this->logToFile('Server configured on ' . $this->host . ' and port ' . $this->port );
+        $this->logToFile('Server configured on ' . $this->host . ' and port ' . $this->port);
     }
 
     /**
@@ -98,27 +101,33 @@ class ServerStartCommand extends Command
     }
 
     /**
-     * Handles the incoming packages
+     * Set's up the listeners for handling incoming packages
      *
      * @param ServerSocket $server
      */
-    private function onIncoming(ServerSocket $server)
+    private function onIncoming(ServerSocket $server, LoopInterface $loop)
     {
-        $server->on('connection', function ($client) {
+        $server->on('connection', function ($connection) use ($loop){
 
-            if (!$client->authenticated) {
-                $this->authenticate($client);
+            $client = new Client($connection, $loop, $this->database);
+
+            if (!$client->getIsAuthenticated()) {
+                $client->authenticate();
             }
 
             // Handle incoming data from existing connections
-            $client->on('data', function ($data) use ($client) {
-                if ($client->authenticated) {
-                    $this->processUserInput($data, $client);
+            $connection->on('data', function ($data) use ($client) {
+                if ($client->getIsAuthenticated()) {
+                    if ($client->isAddedToClients()){
+                        $this->processUserInput($data, $client);
+                    } else {
+                        $this->handleNewClient($client);
+                    }
                 }
             });
 
             // Handling the end of connections
-            $client->on('end', function () use ($client) {
+            $connection->on('end', function () use ($client) {
                 $this->clients->detach($client);
             });
         });
@@ -138,87 +147,7 @@ class ServerStartCommand extends Command
             $this->sendMessageToClients($data, $client);
         }
 
-        $this->processCommand($data, $client, $command);
-    }
-
-
-    private function authenticate($client)
-    {
-        $client->write('Please login by entering your unique nickname:'.PHP_EOL);
-        $client->on('data', $func = function ($data) use (&$client, &$func)
-        {
-            $data = trim($data);
-
-            if (isset($client->nickname)) {
-
-                $client->password = $data;
-
-                // authenticate this client
-                $result = $this->database->fetch("
-                      SELECT  password
-                      FROM    users
-                      WHERE   nickname    = :nickname
-                      LIMIT 1
-                 ", array('nickname' => $client->nickname)
-                );
-
-                if ($result == false){
-
-                    if ($client->register == true) {
-                        // Create the nickname and set the password
-                        $result = $this->database->query("
-                        INSERT INTO users (
-                            nickname, password
-                        )
-                        VALUES
-                        ( :nickname, :password_hash )
-                        ",
-                            array(
-                                'nickname' => $client->nickname,
-                                'password_hash' => password_hash($client->password, PASSWORD_DEFAULT)
-                            )
-                        );
-                        var_dump($result);
-                        if ($result == true) {
-                            $client->authenticated = true;
-                            $client->removeListener('data', $func);
-                            $this->handleNewClient($client);
-                        }
-                    }
-                } else {
-                    if (password_verify($client->password, $result['password'])) {
-                        $client->authenticated = true;
-                        $client->removeListener('data', $func);
-                        $this->handleNewClient($client);
-
-                    } else {
-                        $client->write('Invalid nickname password, try again: ' . PHP_EOL);
-                    }
-                }
-            }
-            else {
-                // Validate nickname
-                if (strlen($data) >= 3 && strlen($data) <= 15) {
-                    $client->nickname = strtolower($data);
-                    $result = $this->database->fetch("
-                          SELECT  nickname
-                          FROM    users
-                          WHERE   nickname    = :nickname
-                          LIMIT 1
-                     ", array('nickname' => $client->nickname)
-                    );
-
-                    if ($result !== false){
-                        $client->write('Password:' . PHP_EOL);
-                    } else {
-                        // new
-                        $client->register = true;
-                        $client->write('This is a new nickname, please enter a password to register: ' . PHP_EOL);
-                    }
-
-                }
-            }
-        });
+        $this->processCommand($client, $command);
     }
 
     /*
@@ -240,11 +169,10 @@ class ServerStartCommand extends Command
     /**
      * Execute a given command for a specific client
      *
-     * @param $data
      * @param $client
      * @param $command
      */
-    private function processCommand($data, $client, $command)
+    private function processCommand($client, $command)
     {
         if (empty($command)) {
             return;
@@ -278,7 +206,7 @@ class ServerStartCommand extends Command
                 continue;
             }
 
-            $client->write($current->nickname . '> ' . $msg . PHP_EOL);
+            $client->write($current->getNickname() . '> ' . $msg . PHP_EOL);
         }
     }
 
@@ -287,8 +215,9 @@ class ServerStartCommand extends Command
         // Add client to the list
         $this->clients->attach($client);
 
-        $this->sendWelcomeMessage($client, 'Welcome to our chat '.$client->nickname.'. The current amount of connections is ' . count($this->clients) . PHP_EOL);
+        $client->setAddedToClients(true);
 
+        $this->sendWelcomeMessage($client, 'Welcome to our chat '.$client->getNickname.'. The current amount of connections is ' . count($this->clients) . PHP_EOL);
     }
 
     /**
