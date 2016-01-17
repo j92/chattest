@@ -1,6 +1,4 @@
-#!/usr/bin/env php
 <?php
-// app.php
 
 use Chat\Commands\ServerStartCommand;
 use Chat\DatabaseAdapter;
@@ -8,7 +6,6 @@ use React\EventLoop\Factory as LoopFactory;
 use React\Socket\Server as ServerSocket;
 use Symfony\Component\Console\Application;
 
-//
 require __DIR__.'/vendor/autoload.php';
 
 date_default_timezone_set('Europe/Amsterdam');
