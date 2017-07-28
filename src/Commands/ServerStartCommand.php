@@ -1,23 +1,15 @@
 <?php
-/**
- * Created by PhpStorm.
- * User: joost
- * Date: 13-01-16
- * Time: 14:32
- */
 
 namespace Chat\Commands;
 
+use Chat\Client;
 use Chat\DatabaseAdapter;
-use React\EventLoop\Factory as LoopFactory;
 use React\EventLoop\LoopInterface;
 use React\Socket\Server as ServerSocket;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
-use Chat\Client;
-
 
 class ServerStartCommand extends Command
 {
@@ -52,12 +44,6 @@ class ServerStartCommand extends Command
         ;
     }
 
-    /**
-     * Start the chat server
-     *
-     * @param InputInterface $input
-     * @param OutputInterface $output
-     */
     protected function execute(InputInterface $input, OutputInterface $output)
     {
         // Store the OutputInterface
@@ -74,10 +60,6 @@ class ServerStartCommand extends Command
         $this->loop->run();
     }
 
-    /**
-     * Configure the server socket
-     * @throws \React\Socket\ConnectionException
-     */
     private function configureServerSocket()
     {
         // Set up the listeners for handling incoming packages
@@ -89,10 +71,6 @@ class ServerStartCommand extends Command
         $this->logToFile('Server configured on ' . $this->host . ' and port ' . $this->port);
     }
 
-    /**
-     * Tell the server socket to start listening
-     * @throws \React\Socket\ConnectionException
-     */
     private function startServerSocket()
     {
         $this->logToFile('Server started listening on ' . $this->host . ' and port ' . $this->port );
@@ -100,11 +78,6 @@ class ServerStartCommand extends Command
         $this->server_socket->listen($this->port, $this->host);
     }
 
-    /**
-     * Set's up the listeners for handling incoming packages
-     *
-     * @param ServerSocket $server
-     */
     private function onIncoming(ServerSocket $server, LoopInterface $loop)
     {
         $server->on('connection', function ($connection) use ($loop){
@@ -133,10 +106,6 @@ class ServerStartCommand extends Command
         });
     }
 
-    /*
-     * Process the user input
-     *
-     */
     private function processUserInput($data, $client)
     {
         $data = trim($data);
@@ -150,9 +119,6 @@ class ServerStartCommand extends Command
         $this->processCommand($client, $command);
     }
 
-    /*
-     * Check if user input is a system command
-     */
     private function isCommand($data)
     {
         $commands = array('quit', 'nick');
@@ -166,12 +132,6 @@ class ServerStartCommand extends Command
         return false;
     }
 
-    /**
-     * Execute a given command for a specific client
-     *
-     * @param $client
-     * @param $command
-     */
     private function processCommand($client, $command)
     {
         if (empty($command)) {
@@ -191,12 +151,6 @@ class ServerStartCommand extends Command
         }
     }
 
-    /**
-     * Sends a message to all clients except the sending client
-     *
-     * @param $msg
-     * @param $current
-     */
     private function sendMessageToClients($msg, $current)
     {
         foreach ($this->clients as $client) {
@@ -220,11 +174,6 @@ class ServerStartCommand extends Command
         $this->sendWelcomeMessage($client, 'Welcome to our chat '.$client->getNickname.'. The current amount of connections is ' . count($this->clients) . PHP_EOL);
     }
 
-    /**
-     * Send a welcome message to a given connection
-     *
-     * @param $client
-     */
     private function sendWelcomeMessage($client, $msg)
     {
         // Log the new connection
@@ -233,12 +182,6 @@ class ServerStartCommand extends Command
         $client->write($msg);
     }
 
-    /**
-     * Handles the quit command, closes the connection
-     *
-     * @param $conn
-     * @param $msg
-     */
     private function quit($client, $msg)
     {
         // Log the closing connection
